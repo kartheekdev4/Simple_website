@@ -1,0 +1,75 @@
+---
+- hosts: demo1
+  gather_facts: no
+  become: yes
+  become_method: sudo
+  vars_files:
+    - vars/default.yml
+  tasks:
+    - name: Update Repository cache
+      apt: update_cache=yes cache_valid_time=3600
+    - name: Install Apache
+      ansible.builtin.apt:
+        name: apache2
+        state: present
+    - name: Create document root
+      file:
+        path: "/var/www/html"
+        state: directory
+        owner: "{{app_user}}"
+        mode: 0755
+    - name: Create log directory
+      file:
+        path: "/var/www/html/log"
+        state: directory
+        owner: "{{app_user}}"
+        mode: 0755
+    - name: Copy index test page
+      template:
+        src: "files/index.html"
+        dest: "/var/www/html/index.html"
+      notify:
+        - restart apache2
+    - name: enable apache rewrite module
+      apache2_module: name=rewrite state=present
+      notify:
+        - restart apache2
+    - name: Create document root
+      file:
+        path: "/etc/karthi"
+        state: directory
+        owner: "{{app_user}}"
+        mode: 0755          
+    - name: Ensure private key is present
+      community.crypto.openssl_privatekey:
+        path: /etc/karthi/server.key
+        size: 2048
+        mode: 0600
+        type: RSA   
+
+    - name: Ensure self-signed cert is present
+      community.crypto.x509_certificate:
+        path: /etc/karthi/server.crt
+        privatekey_path: /etc/karthi/server.key
+        provider: selfsigned
+        selfsigned_not_after: "+3650d" # this is the default
+        mode: 0644 
+    
+    - name: Set up Apache Https virtuahHost
+      template:
+        src: "files/ssl.conf"
+        dest: "/etc/apache2/sites-available/ssl.conf"
+
+    - name: Enable new conf
+      shell: /usr/sbin/a2ensite ssl.conf
+      notify: restart apache2
+
+    - name:  Enable ssl module
+      shell: /usr/sbin/a2enmod ssl
+      notify:  
+        - restart apache2
+        
+
+  handlers:
+    - name: restart apache2
+      service: name=apache2 state=restarted 
